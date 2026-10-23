@@ -292,6 +292,20 @@ impl Storage for RocksdbStorage {
         }
     }
 
+    fn supports_local_sync(&self) -> bool {
+        !self.read_only
+    }
+
+    async fn sync(&mut self) -> ZResult<()> {
+        let db_cell = self.db.lock().await;
+        let db = db_cell
+            .as_ref()
+            .ok_or(zerror!("Could not get DB ref in sync"))?;
+        // The write batch includes payload and recovery metadata in the WAL. Synchronizing the
+        // WAL establishes local stable-storage completion without claiming replica durability.
+        db.flush_wal(true).map_err(rocksdb_err_to_zerr)
+    }
+
     // When receiving a GET operation
     async fn get(
         &mut self,
@@ -417,6 +431,14 @@ fn put_kv(
         Some(k) => k.to_string(),
         None => NONE_KEY.to_string(),
     };
+    let existed = db
+        .get_cf(
+            db.cf_handle(CF_PAYLOADS)
+                .ok_or(zerror!("Missing payload column family"))?,
+            &key,
+        )
+        .map_err(rocksdb_err_to_zerr)?
+        .is_some();
     // Write content and encoding+timestamp in different Column Families
     let mut batch = WriteBatch::default();
     batch.put_cf(
@@ -435,7 +457,11 @@ fn put_kv(
     );
 
     match db.write(batch) {
-        Ok(()) => Ok(StorageInsertionResult::Inserted),
+        Ok(()) => Ok(if existed {
+            StorageInsertionResult::Replaced
+        } else {
+            StorageInsertionResult::Inserted
+        }),
         Err(e) => Err(rocksdb_err_to_zerr(e)),
     }
 }
@@ -573,4 +599,53 @@ fn decode_data_info(buf: &[u8]) -> ZResult<(Encoding, Timestamp, bool)> {
 
 fn rocksdb_err_to_zerr(err: rocksdb::Error) -> Error {
     zerror!("Rocksdb error: {}", err.into_string()).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn synchronized_put_replace_and_delete_survive_reopening() {
+        let directory = tempfile::tempdir().unwrap();
+        let volume = RocksdbVolume {
+            admin_status: serde_json::json!({}),
+            root: directory.path().to_owned(),
+        };
+        let mut parsed = zenoh_backend_traits::config::PluginConfig::try_from(("test", &serde_json::json!({
+            "storages": {"test": {"key_expr": "test/**", "volume": {"id": "rocksdb", "dir": "state", "create_db": true}}}
+        }))).unwrap();
+        let config = parsed.storages.remove(0);
+        let key = Some(OwnedKeyExpr::new("test/key").unwrap());
+        let client = zenoh::open(zenoh::Config::from_json5(r#"{mode:"peer",listen:{endpoints:[]},scouting:{multicast:{enabled:false},gossip:{enabled:false}}}"#).unwrap()).await.unwrap();
+        let clock = client.new_timestamp();
+        let mut storage = volume.create_storage(config.clone()).await.unwrap();
+        assert!(storage.supports_local_sync());
+        assert!(matches!(
+            storage
+                .put(key.clone(), "first".into(), Encoding::TEXT_PLAIN, clock)
+                .await
+                .unwrap(),
+            StorageInsertionResult::Inserted
+        ));
+        storage.sync().await.unwrap();
+        assert!(matches!(
+            storage
+                .put(key.clone(), "second".into(), Encoding::TEXT_PLAIN, clock)
+                .await
+                .unwrap(),
+            StorageInsertionResult::Replaced
+        ));
+        storage.sync().await.unwrap();
+        drop(storage);
+        let mut storage = volume.create_storage(config.clone()).await.unwrap();
+        let values = storage.get(key.clone(), "").await.unwrap();
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].payload.try_to_string().unwrap(), "second");
+        storage.delete(key.clone(), clock).await.unwrap();
+        storage.sync().await.unwrap();
+        drop(storage);
+        let mut storage = volume.create_storage(config).await.unwrap();
+        assert!(storage.get(key, "").await.unwrap().is_empty());
+    }
 }

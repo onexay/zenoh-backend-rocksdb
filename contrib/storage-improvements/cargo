@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd -- "$script_dir/../.." && pwd)
+if [[ $(uname -s) == Darwin ]]; then
+    exec msl --distribution "${MSL_DISTRO:-Dev}" --cd "/mnt/macos$repo_root" \
+        --exec env "ZENOH_LOCAL_SOURCE=${ZENOH_LOCAL_SOURCE:-0}" bash "/mnt/macos$script_dir/cargo" "$@"
+fi
+cd -- "$repo_root"
+export CARGO_TARGET_DIR=${ZENOH_FORK_TARGET_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/zenoh-fork/target}
+export CARGO_PROFILE_DEV_DEBUG=0
+export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
+if [[ ${ZENOH_LOCAL_SOURCE:-0} != 1 ]]; then
+    exec "$HOME/.cargo/bin/cargo" "$@"
+fi
+zenoh_source=$(cd -- "$repo_root/../zenoh" && pwd)
+if [[ ${1:-} == fmt ]]; then
+    exec "$HOME/.cargo/bin/cargo" "$@"
+fi
+subcommand=$1
+shift
+exec "$HOME/.cargo/bin/cargo" "$subcommand" \
+    --config "patch.\"https://github.com/onexay/zenoh.git\".zenoh.path=\"$zenoh_source/zenoh\"" \
+    --config "patch.\"https://github.com/onexay/zenoh.git\".zenoh_backend_traits.path=\"$zenoh_source/plugins/zenoh-backend-traits\"" \
+    --config "patch.\"https://github.com/onexay/zenoh.git\".zenoh-plugin-trait.path=\"$zenoh_source/plugins/zenoh-plugin-trait\"" \
+    --config "patch.\"https://github.com/onexay/zenoh.git\".zenoh-ext.path=\"$zenoh_source/zenoh-ext\"" \
+    --config "patch.\"https://github.com/onexay/zenoh.git\".zenoh-util.path=\"$zenoh_source/commons/zenoh-util\"" \
+    "$@"
