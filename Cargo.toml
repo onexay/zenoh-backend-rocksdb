@@ -51,12 +51,12 @@ zenoh = { features = [
   "unstable",
   "internal",
   "plugins",
-], version = "1.10.1", git = "https://github.com/eclipse-zenoh/zenoh.git" , branch = "main" }
+], version = "1.10.1", git = "https://github.com/onexay/zenoh.git", rev = "167c5dd18ae56a006abc8476d0baa84cd0790606" }
 
-zenoh_backend_traits = { version = "1.10.1", git = "https://github.com/eclipse-zenoh/zenoh.git" , branch = "main" }
-zenoh-plugin-trait = { version = "1.10.1", git = "https://github.com/eclipse-zenoh/zenoh.git" , branch = "main" }
-zenoh-ext = { version = "1.10.1", git = "https://github.com/eclipse-zenoh/zenoh.git" , branch = "main" }
-zenoh-util = { version = "1.10.1", git = "https://github.com/eclipse-zenoh/zenoh.git" , branch = "main" }
+zenoh_backend_traits = { version = "1.10.1", git = "https://github.com/onexay/zenoh.git", rev = "167c5dd18ae56a006abc8476d0baa84cd0790606" }
+zenoh-plugin-trait = { version = "1.10.1", git = "https://github.com/onexay/zenoh.git", rev = "167c5dd18ae56a006abc8476d0baa84cd0790606" }
+zenoh-ext = { version = "1.10.1", git = "https://github.com/onexay/zenoh.git", rev = "167c5dd18ae56a006abc8476d0baa84cd0790606" }
+zenoh-util = { version = "1.10.1", git = "https://github.com/onexay/zenoh.git", rev = "167c5dd18ae56a006abc8476d0baa84cd0790606" }
 
 
 [build-dependencies]
@@ -69,3 +69,6 @@ copyright = "2022 ZettaScale Technology"
 section = "net"
 license-file = ["LICENSE", "0"]
 depends = "zenoh-plugin-storage-manager (=1.10.1)"
+
+[dev-dependencies]
+tempfile = "3"
